@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.apakrou.virtuous",
+      "sha256_cert_fingerprints": [
+        "FD:FA:11:25:03:90:C2:BD:50:03:C0:18:14:69:3E:3F:A8:7B:7C:02:A0:69:82:5D:3D:7E:C8:F4:95:63:D9:B0"
+      ]
+    }
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "5C7VDP8ST6.com.apakrou.virtuous",
+        "paths": [
+          "/",
+          "/auth/callback"
+        ]
+      }
+    ]
+  }
+}
