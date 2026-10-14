@@ -4,25 +4,126 @@
   const title = document.getElementById("title");
   const description = document.getElementById("description");
   const button = document.getElementById("open");
+  const confirm = document.getElementById("confirm");
+  const browserHelp = document.getElementById("browser-help");
   const status = document.getElementById("status");
   const help = document.getElementById("help");
+  // This is the public app key, never a privileged backend credential.
+  const authOrigin = "https://hlupxubllyfsupjrjaca.supabase.co";
+  const publishableKey = "sb_publishable_4xIHXzzlXSJhfD3o8Y792Q_F7tcbZwh";
+  let link = null;
+  let generation = 0;
+  let activeRequest = null;
+
   button.addEventListener("click", () => {
-    status.textContent = "Continue in the app. If it hasn’t opened, follow the instructions below.";
+    status.textContent =
+      "If the app hasn’t opened, you can confirm your email in this browser below, then sign in on your phone or emulator.";
+    if (link?.type === "recovery") {
+      status.textContent =
+        "Continue in the app. If it hasn’t opened, follow the instructions below.";
+    }
   });
+
+  confirm.addEventListener("click", async () => {
+    if (!link || link.type !== "email" || activeRequest) return;
+    const tokenHash = link.tokenHash;
+    const requestGeneration = generation;
+    const controller = new AbortController();
+    activeRequest = controller;
+    confirm.disabled = true;
+    button.hidden = true;
+    status.textContent = "Confirming your email…";
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(authOrigin + "/auth/v1/verify", {
+        method: "POST",
+        headers: { apikey: publishableKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ token_hash: tokenHash, type: "email" }),
+        credentials: "omit",
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        signal: controller.signal,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (requestGeneration !== generation) return;
+        status.textContent =
+          data?.error_code === "otp_expired"
+            ? "This link has expired or has already been used. If you confirmed earlier, sign in to BeVirtuous. Otherwise, request a fresh confirmation email in the app."
+            : "We couldn’t confirm this link. Try again, or request a fresh confirmation email in BeVirtuous.";
+        return;
+      }
+      // Do not install a browser session. Revoke only the session just issued
+      // by verification; other signed-in devices keep their sessions.
+      if (typeof data?.access_token === "string") {
+        await fetch(authOrigin + "/auth/v1/logout?scope=local", {
+          method: "POST",
+          headers: {
+            apikey: publishableKey,
+            Authorization: "Bearer " + data.access_token,
+          },
+          credentials: "omit",
+          cache: "no-store",
+          referrerPolicy: "no-referrer",
+          signal: controller.signal,
+        }).catch(() => {});
+      }
+      if (requestGeneration !== generation) return;
+      if (!data?.user?.id || !data.user.email_confirmed_at) {
+        status.textContent =
+          "We couldn’t confirm this link. Try again, or request a fresh confirmation email in BeVirtuous.";
+        return;
+      }
+      link = null;
+      window.history.replaceState(null, "", window.location.pathname);
+      title.textContent = "Email confirmed";
+      description.textContent =
+        "Return to BeVirtuous on your phone or emulator and sign in with your email and password.";
+      button.hidden = true;
+      button.removeAttribute("href");
+      confirm.hidden = true;
+      browserHelp.hidden = true;
+      help.hidden = true;
+      status.textContent = "You can close this page.";
+    } catch {
+      if (requestGeneration === generation) {
+        status.textContent =
+          "We couldn’t connect to confirm your email. Check your connection and try again. If you confirmed earlier, sign in to BeVirtuous.";
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (activeRequest === controller) activeRequest = null;
+      if (requestGeneration === generation) {
+        confirm.disabled = false;
+        if (link) button.hidden = false;
+      }
+    }
+  });
+
   function renderLink() {
+    generation += 1;
+    activeRequest?.abort();
+    activeRequest = null;
+    link = null;
+    confirm.hidden = true;
+    confirm.disabled = false;
+    browserHelp.hidden = true;
     button.hidden = true;
     button.removeAttribute("href");
     help.hidden = true;
     status.textContent = "";
     title.textContent = "Open your email link";
-    description.textContent = "Open the latest confirmation or password reset email and tap its link to continue.";
-    // Fragments are browser-local: they never reach the hosting server. Do not
-    // verify tokens here, make network requests, log them, or persist them.
+    description.textContent =
+      "Open the latest confirmation or password reset email and tap its link to continue.";
+    // Fragments never reach the hosting server. Only an explicit browser
+    // confirmation click may send a signup hash to the fixed Auth endpoint.
     const fragment = window.location.hash.slice(1);
     const parameters = new URLSearchParams(fragment);
     const tokenHash = parameters.get("token_hash");
     const type = parameters.get("type");
-    const valid = fragment.length < 128 &&
+    const valid =
+      !window.location.search &&
+      fragment.length < 128 &&
       parameters.size === 2 &&
       parameters.getAll("token_hash").length === 1 &&
       parameters.getAll("type").length === 1 &&
@@ -32,22 +133,26 @@
     if (!valid) {
       if (fragment || window.location.search) {
         title.textContent = "This link is incomplete";
-        description.textContent = "Return to BeVirtuous and request a fresh confirmation or password reset email.";
+        description.textContent =
+          "Return to BeVirtuous and request a fresh confirmation or password reset email.";
       }
       return;
     }
 
-    title.textContent = type === "recovery" ? "Reset your password" : "Confirm your email";
-    description.textContent = type === "recovery"
-      ? "Continue in BeVirtuous to choose your new password."
-      : "Continue in BeVirtuous to confirm your email and finish signing up.";
-
-    // One fixed destination, constructed from validated values. Keep the hash in
-    // the page URL so reopening in Safari preserves it. No automatic navigation:
-    // mail scanners and browser previews must not consume the verification link.
-    button.href = "virtuous://auth/callback?token_hash=" + tokenHash.toLowerCase() + "&type=" + type;
+    title.textContent =
+      type === "recovery" ? "Reset your password" : "Confirm your email";
+    description.textContent =
+      type === "recovery"
+        ? "Continue in BeVirtuous to choose your new password."
+        : "Open BeVirtuous to finish signing up, or confirm your email in this browser and sign in on your phone or emulator.";
+    link = { tokenHash: tokenHash.toLowerCase(), type };
+    // Preserve the app's verification and explicit account/session acceptance.
+    button.href =
+      "virtuous://auth/callback?token_hash=" + link.tokenHash + "&type=" + type;
     button.hidden = false;
     help.hidden = false;
+    confirm.hidden = type !== "email";
+    browserHelp.hidden = type !== "email";
   }
   // A mail client can reuse the same browser tab for a later email link.
   window.addEventListener("hashchange", renderLink);
