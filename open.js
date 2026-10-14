@@ -3,9 +3,7 @@
 (() => {
   const title = document.getElementById("title");
   const description = document.getElementById("description");
-  const button = document.getElementById("open");
   const confirm = document.getElementById("confirm");
-  const browserHelp = document.getElementById("browser-help");
   const status = document.getElementById("status");
   const help = document.getElementById("help");
   // This is the public app key, never a privileged backend credential.
@@ -15,23 +13,23 @@
   let generation = 0;
   let activeRequest = null;
 
-  button.addEventListener("click", () => {
-    status.textContent =
-      "If the app hasn’t opened, you can confirm your email in this browser below, then sign in on your phone or emulator.";
-    if (link?.type === "recovery") {
-      status.textContent =
-        "Continue in the app. If it hasn’t opened, follow the instructions below.";
-    }
-  });
-
   confirm.addEventListener("click", async () => {
-    if (!link || link.type !== "email" || activeRequest) return;
+    if (!link || activeRequest) return;
+    if (link.type === "recovery") {
+      window.location.assign(
+        "virtuous://auth/callback?token_hash=" +
+          link.tokenHash +
+          "&type=recovery",
+      );
+      status.textContent =
+        "Continue in BeVirtuous to choose your new password. Open this email on a device with the app installed.";
+      return;
+    }
     const tokenHash = link.tokenHash;
     const requestGeneration = generation;
     const controller = new AbortController();
     activeRequest = controller;
     confirm.disabled = true;
-    button.hidden = true;
     status.textContent = "Confirming your email…";
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
@@ -79,10 +77,7 @@
       title.textContent = "Email confirmed";
       description.textContent =
         "Return to BeVirtuous on your phone or emulator and sign in with your email and password.";
-      button.hidden = true;
-      button.removeAttribute("href");
       confirm.hidden = true;
-      browserHelp.hidden = true;
       help.hidden = true;
       status.textContent = "You can close this page.";
     } catch {
@@ -95,7 +90,6 @@
       if (activeRequest === controller) activeRequest = null;
       if (requestGeneration === generation) {
         confirm.disabled = false;
-        if (link) button.hidden = false;
       }
     }
   });
@@ -107,9 +101,6 @@
     link = null;
     confirm.hidden = true;
     confirm.disabled = false;
-    browserHelp.hidden = true;
-    button.hidden = true;
-    button.removeAttribute("href");
     help.hidden = true;
     status.textContent = "";
     title.textContent = "Open your email link";
@@ -122,6 +113,7 @@
     const tokenHash = parameters.get("token_hash");
     const type = parameters.get("type");
     const valid =
+      ["/", "/auth/callback"].includes(window.location.pathname) &&
       !window.location.search &&
       fragment.length < 128 &&
       parameters.size === 2 &&
@@ -144,15 +136,14 @@
     description.textContent =
       type === "recovery"
         ? "Continue in BeVirtuous to choose your new password."
-        : "Open BeVirtuous to finish signing up, or confirm your email in this browser and sign in on your phone or emulator.";
+        : "Confirm your email to finish signing up. Then return to BeVirtuous and sign in.";
     link = { tokenHash: tokenHash.toLowerCase(), type };
-    // Preserve the app's verification and explicit account/session acceptance.
-    button.href =
-      "virtuous://auth/callback?token_hash=" + link.tokenHash + "&type=" + type;
-    button.hidden = false;
-    help.hidden = false;
-    confirm.hidden = type !== "email";
-    browserHelp.hidden = type !== "email";
+    // Verified app links are routed by iOS/Android before this website opens.
+    // Never race an app launch against browser verification of the same hash.
+    confirm.textContent =
+      type === "recovery" ? "Open BeVirtuous" : "Confirm email";
+    confirm.hidden = false;
+    help.hidden = type !== "recovery";
   }
   // A mail client can reuse the same browser tab for a later email link.
   window.addEventListener("hashchange", renderLink);
